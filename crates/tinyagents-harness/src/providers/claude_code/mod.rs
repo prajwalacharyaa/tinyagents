@@ -223,6 +223,7 @@ impl ClaudeCodeProvider {
         model_override: Option<&str>,
         thread_id: String,
         persist_session: bool,
+        agent: Option<String>,
     ) -> anyhow::Result<ChatResponse> {
         // Acquire the per-thread mutex *before* the global concurrency
         // semaphore (M-14). Reversed, N callers on one busy thread each hold
@@ -263,6 +264,7 @@ impl ClaudeCodeProvider {
             stream,
             anthropic_api_key: self.anthropic_api_key.clone(),
             mcp_provider: self.mcp_provider.clone(),
+            agent,
         })
         .await;
         drop(_thread_guard);
@@ -298,6 +300,21 @@ fn coalesce_system_prompt(messages: &[ChatMessage]) -> Option<String> {
         .filter(|content| !content.trim().is_empty())
         .collect();
     (!parts.is_empty()).then(|| parts.join("\n\n"))
+}
+
+/// The Claude Code agent the host asked this conversation to run as (`metadata.claude_agent`, passed to the
+/// CLI as `--agent`), when it is a plain agent name.
+fn agent_from_request(request: &ModelRequest) -> Option<String> {
+    request
+        .metadata
+        .get("claude_agent")
+        .and_then(serde_json::Value::as_str)
+        .filter(|name| {
+            !name.is_empty()
+                && name.len() <= 40
+                && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+        })
+        .map(str::to_string)
 }
 
 /// Resolve the caller's logical conversation id. A content hash is not a
@@ -570,6 +587,7 @@ impl ChatModel<()> for ClaudeCodeProvider {
             request.model.as_deref(),
             thread_id,
             persist_session,
+            agent_from_request(&request),
         )
         .await
         .map(|response| model_response_with_tools(response, &request.tools))
@@ -584,6 +602,7 @@ impl ChatModel<()> for ClaudeCodeProvider {
         let thread_id = thread_key_from_request(&request);
         let persist_session = request_has_session_identity(&request);
         let model_override = request.model.clone();
+        let agent = agent_from_request(&request);
         let tools = request.tools.clone();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = AbortOnDrop(tokio::spawn(async move {
@@ -601,6 +620,7 @@ impl ChatModel<()> for ClaudeCodeProvider {
                 model_override.as_deref(),
                 thread_id,
                 persist_session,
+                agent,
             );
             tokio::pin!(call);
             let response = loop {

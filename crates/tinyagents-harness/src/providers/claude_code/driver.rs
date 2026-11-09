@@ -306,6 +306,8 @@ pub(crate) struct TurnContext<'a> {
     pub persist_session: bool,
     /// Model name passed to `--model`.
     pub model: String,
+    /// Run the session as this Claude Code agent (`--agent <name>`): its own prompt, tools, skills and hooks.
+    pub agent: Option<String>,
     /// Combined system prompt (all `system` messages joined), written to a
     /// scratch file and passed via `--append-system-prompt-file`.
     pub append_system_prompt: Option<String>,
@@ -512,6 +514,10 @@ pub(crate) async fn run_turn(ctx: TurnContext<'_>) -> anyhow::Result<ChatRespons
         "--model".into(),
         ctx.model.clone(),
     ];
+    if let Some(agent) = ctx.agent.as_ref() {
+        args.push("--agent".into());
+        args.push(agent.clone());
+    }
     append_session_args(&mut args, ctx.persist_session, is_new, &cc_session_id);
     args.extend(
         append_system_prompt_args(scratch.path(), ctx.append_system_prompt.as_deref())

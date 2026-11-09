@@ -45,6 +45,7 @@ mod retry {
     ) -> anyhow::Result<ChatResponse> {
         let messages = vec![ChatMessage::user("hi")];
         run_turn(TurnContext {
+            agent: None,
             bin_path: bin,
             workspace_dir: dir.to_path_buf(),
             project_dir: dir.join("project"),
@@ -456,6 +457,7 @@ async fn run_fake_claude(script_body: &str, api_key: Option<&str>) -> anyhow::Re
     std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     let messages = [ChatMessage::user("hello")];
     run_turn(TurnContext {
+        agent: None,
         bin_path: bin,
         workspace_dir: dir.path().join("ws"),
         project_dir: dir.path().join("project"),
@@ -627,6 +629,7 @@ mod structured_exit {
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         let messages = vec![ChatMessage::user("hi")];
         run_turn(TurnContext {
+            agent: None,
             bin_path: bin,
             workspace_dir: dir.path().to_path_buf(),
             project_dir: dir.path().join("project"),
@@ -697,6 +700,7 @@ async fn shared_session_receives_a_pending_user_turn_once() {
 
     for _ in 0..3 {
         run_turn(TurnContext {
+            agent: None,
             bin_path: bin.clone(),
             workspace_dir: dir.path().join("ws"),
             project_dir: dir.path().join("project"),
