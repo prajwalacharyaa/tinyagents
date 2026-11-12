@@ -79,8 +79,9 @@ fn captures_text_tool_call_and_usage() {
         "input_json_delta text must stay out of the visible text: {text_chunks:?}"
     );
 
-    // Aggregated response.
-    assert_eq!(mapper.final_text, "Hello world");
+    // Aggregated response: the short text before the tool step is narration, so it stays out of `final_text`,
+    // but this turn ends on that tool step, so it is still the answer (checked at the end).
+    assert_eq!(mapper.final_text, "");
     assert!(
         mapper.tool_calls.is_empty(),
         "no ToolCall is aggregated for a CLI-internal tool_use block"
@@ -92,4 +93,5 @@ fn captures_text_tool_call_and_usage() {
     assert_eq!(u.input_tokens, 120);
     assert_eq!(u.output_tokens, 42);
     assert_eq!(u.cached_input_tokens, 80);
+    assert_eq!(mapper.into_response().text.as_deref(), Some("Hello world"));
 }
