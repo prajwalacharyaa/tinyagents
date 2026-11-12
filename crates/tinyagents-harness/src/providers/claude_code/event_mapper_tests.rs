@@ -199,3 +199,34 @@ fn is_error_result_carries_its_reason_as_the_error() {
     });
     assert_eq!(m.error.as_deref(), Some("Invalid API key"));
 }
+
+/// 2026-11-12: the steps' narration ("There's `mochi-phone open` for exactly this.Opened on your phone now.") was
+/// saved and read out with the answer.
+#[test]
+fn narration_before_a_tool_step_is_not_part_of_the_answer() {
+    let tool = |i: u64| json!({"type":"content_block_start","index":i,"content_block":{"type":"tool_use","id":"c","name":"Bash"}});
+    let mut m = EventMapper::new();
+    m.handle(ClaudeCodeEvent::StreamEvent { event: text_block_start(0) });
+    m.handle(ClaudeCodeEvent::StreamEvent { event: text_delta(0, "There's `mochi-phone open` for exactly this.") });
+    m.handle(ClaudeCodeEvent::StreamEvent { event: tool(1) });
+    m.handle(ClaudeCodeEvent::StreamEvent { event: text_block_start(2) });
+    m.handle(ClaudeCodeEvent::StreamEvent { event: text_delta(2, "Opened on your phone now.") });
+    assert_eq!(m.into_response().text.as_deref(), Some("Opened on your phone now."));
+
+    // a real answer before a last chore stays
+    let answer = "The closing card's text and background are both near-black. ".repeat(5).trim_end().to_string();
+    let mut m = EventMapper::new();
+    m.handle(ClaudeCodeEvent::StreamEvent { event: text_block_start(0) });
+    m.handle(ClaudeCodeEvent::StreamEvent { event: text_delta(0, &answer) });
+    m.handle(ClaudeCodeEvent::StreamEvent { event: tool(1) });
+    m.handle(ClaudeCodeEvent::StreamEvent { event: text_block_start(2) });
+    m.handle(ClaudeCodeEvent::StreamEvent { event: text_delta(2, "Notes updated.") });
+    assert_eq!(m.into_response().text, Some(format!("{answer}\n\nNotes updated.")));
+
+    // a turn that ends on a tool step keeps its last line rather than nothing
+    let mut m = EventMapper::new();
+    m.handle(ClaudeCodeEvent::StreamEvent { event: text_block_start(0) });
+    m.handle(ClaudeCodeEvent::StreamEvent { event: text_delta(0, "Setting up the live preview now.") });
+    m.handle(ClaudeCodeEvent::StreamEvent { event: tool(1) });
+    assert_eq!(m.into_response().text.as_deref(), Some("Setting up the live preview now."));
+}

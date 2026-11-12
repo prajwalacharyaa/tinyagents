@@ -37,6 +37,9 @@ use serde_json::Value;
 use super::bridge::{ChatResponse, ProviderDelta, UsageInfo};
 use super::stream_parser::ClaudeCodeEvent;
 
+/// Text shorter than this, written just before a tool step, is narration ("Now let me check X.").
+const NARRATION_MAX_CHARS: usize = 200;
+
 /// In-progress state for one content block between its `content_block_start`
 /// and `content_block_stop` events.
 #[derive(Debug, Clone)]
@@ -64,8 +67,13 @@ pub struct EventMapper {
     /// Per-content-block accumulator state, keyed by the block's stream
     /// index; entries are removed on `content_block_stop`.
     blocks: HashMap<u64, BlockState>,
-    /// Assistant text accumulated across all `text` blocks seen so far.
+    /// Assistant text accumulated across all `text` blocks seen so far, without the short narration
+    /// written just before a tool step (see `end_step_text`).
     pub final_text: String,
+    /// Where in `final_text` the text since the last tool step starts.
+    step_start: usize,
+    /// The last narration dropped: the answer when a turn ends on a tool step with nothing after it.
+    dropped: String,
     /// Always empty: kept only so tests can assert this provider never
     /// surfaces a tool call, since Claude Code executes its own tool calls
     /// internally and this slot exists purely as a documented invariant, not
@@ -173,6 +181,23 @@ impl EventMapper {
         }
     }
 
+    /// A tool step starts: the text written since the last step is a short line about what it's going to
+    /// do ("Now let me check X."), or an answer written before a last chore. Narration is dropped from the
+    /// final answer (2026-11-12: it was saved and read out on a call as "Now let me check X.Found it. …");
+    /// streaming already showed it. Longer text stays (an answer, then "Notes updated.").
+    fn end_step_text(&mut self) {
+        let step = &self.final_text[self.step_start..];
+        if step.trim().chars().count() < NARRATION_MAX_CHARS {
+            if !step.trim().is_empty() {
+                self.dropped = step.trim().to_string();
+            }
+            self.final_text.truncate(self.step_start);
+        } else if !self.final_text.ends_with(char::is_whitespace) {
+            self.final_text.push_str("\n\n");
+        }
+        self.step_start = self.final_text.len();
+    }
+
     fn handle_assistant_block(&mut self, msg: &Value) -> Vec<ProviderDelta> {
         let ty = msg.get("type").and_then(Value::as_str).unwrap_or("");
         let index = msg.get("index").and_then(Value::as_u64).unwrap_or(0);
@@ -214,6 +239,7 @@ impl EventMapper {
                 Vec::new()
             }
             "tool_use" => {
+                self.end_step_text();
                 // The CLI has ALREADY executed this tool itself (see the module
                 // docs). Track the block so its argument deltas don't leak into
                 // the visible text, but surface no `ToolCallStart` — OpenHuman's
@@ -317,10 +343,12 @@ impl EventMapper {
     /// Build the final aggregated `ChatResponse` once the stream is done.
     pub fn into_response(self) -> ChatResponse {
         ChatResponse {
-            text: if self.final_text.is_empty() {
-                None
-            } else {
+            text: if !self.final_text.trim().is_empty() {
                 Some(self.final_text)
+            } else if !self.dropped.is_empty() {
+                Some(self.dropped)
+            } else {
+                None
             },
             usage: self.usage,
         }
